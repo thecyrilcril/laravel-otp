@@ -23,11 +23,12 @@ it('never exposes the plaintext code in events or exceptions', function (): void
     });
 
     $issued = $this->user->issueOtp(TestPurpose::EmailVerification);
-    $this->user->verifyOtp(TestPurpose::EmailVerification, '999999');
+    $wrong = $issued->code === '999999' ? '111111' : '999999';
+    $this->user->verifyOtp(TestPurpose::EmailVerification, $wrong);
 
     try {
         foreach (range(1, 10) as $i) {
-            $this->user->verifyOtp(TestPurpose::EmailVerification, '999999');
+            $this->user->verifyOtp(TestPurpose::EmailVerification, $wrong);
         }
     } catch (OtpThrottledException $e) {
         $captured[] = $e->getMessage();
