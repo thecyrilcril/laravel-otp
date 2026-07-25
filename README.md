@@ -210,6 +210,14 @@ extracted from:
 - Both rate limits (issue-side and verify-side) come for free the moment the trait is in
   place; if your hand-rolled version had no throttling, or only a bare attempts counter,
   this closes that gap without any extra work on your part.
+- **Check your cache store before relying on the limiters.** Both rate limiters live in
+  your app's **default cache store**. On a single server any store works; on a
+  multi-server deploy, a per-server store (`file`, `array`) gives each server its own
+  counters — an attacker spraying requests across N servers gets roughly N× the
+  configured limits. Use a shared store (`database`, `redis`, `memcached`) in that
+  topology. The per-code `attempts` budget lives in the database row itself and holds
+  regardless of cache topology — it is the backstop, not a replacement for a shared
+  store.
 
 ## Versioning note
 
