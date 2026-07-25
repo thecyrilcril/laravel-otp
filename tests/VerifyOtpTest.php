@@ -97,3 +97,15 @@ it('throttles verification attempts past the limit', function (): void {
     expect(fn () => $this->user->verifyOtp(TestPurpose::EmailVerification, '000000'))
         ->toThrow(OtpThrottledException::class);
 });
+
+it('emits Expired as the failure reason for an expired code, even when the code is correct', function (): void {
+    Event::fake([OtpVerificationFailed::class]);
+
+    $issued = $this->user->issueOtp(TestPurpose::EmailVerification);
+
+    $this->travel(11)->minutes();
+
+    expect($this->user->verifyOtp(TestPurpose::EmailVerification, $issued->code))->toBeFalse();
+
+    Event::assertDispatched(OtpVerificationFailed::class, fn (OtpVerificationFailed $e): bool => $e->reason === FailureReason::Expired);
+});
