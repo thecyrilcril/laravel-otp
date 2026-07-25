@@ -1,0 +1,50 @@
+{
+    "name": "thecyrilcril/laravel-otp",
+    "description": "Purpose-scoped, hashed, rate-limited one-time passwords for Laravel.",
+    "keywords": ["laravel", "otp", "one-time-password", "verification", "security"],
+    "license": "MIT",
+    "authors": [
+        { "name": "Cyril Cril", "email": "cyrilcril@gmail.com" }
+    ],
+    "require": {
+        "php": "^8.4",
+        "illuminate/contracts": "^12.0|^13.0",
+        "illuminate/database": "^12.0|^13.0",
+        "illuminate/support": "^12.0|^13.0"
+    },
+    "require-dev": {
+        "orchestra/testbench": "^10.0|^11.0",
+        "pestphp/pest": "^4.0",
+        "laravel/pint": "^1.24",
+        "phpstan/phpstan": "^2.1",
+        "larastan/larastan": "^3.0"
+    },
+    "autoload": {
+        "psr-4": { "Thecyrilcril\\Otp\\": "src/" }
+    },
+    "autoload-dev": {
+        "psr-4": { "Thecyrilcril\\Otp\\Tests\\": "tests/" }
+    },
+    "config": {
+        "sort-packages": true,
+        "allow-plugins": { "pestphp/pest-plugin": true }
+    },
+    "extra": {
+        "laravel": {
+            "providers": ["Thecyrilcril\\Otp\\OtpServiceProvider"]
+        }
+    },
+    "scripts": {
+        "test": "vendor/bin/pest",
+        "test:coverage": "@php -d xdebug.mode=coverage vendor/bin/pest --coverage --min=90",
+        "lint": "vendor/bin/pint",
+        "analyse": "vendor/bin/phpstan analyse",
+        "ci": [
+            "@lint --test",
+            "@analyse",
+            "@test:coverage"
+        ]
+    },
+    "minimum-stability": "stable",
+    "prefer-stable": true
+}

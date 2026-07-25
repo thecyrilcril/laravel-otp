@@ -177,7 +177,7 @@ All carry the model and purpose — never the plaintext code.
 | Event | When | Notes |
 |---|---|---|
 | `OtpIssued` | after row creation | audit-log hook (e.g. binitng's activity timeline) |
-| `OtpVerified` | after successful consume | |
+| `OtpVerified` | after a successful verify or consume | |
 | `OtpVerificationFailed` | any failed verify/consume | carries reason enum: `NotFound`, `Expired`, `CodeMismatch`, `ContextMismatch`, `Throttled` — precise logging/alerting while the UI shows one generic message |
 
 ## Data flow (phone verification example)
