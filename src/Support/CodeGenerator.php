@@ -10,6 +10,14 @@ final class CodeGenerator
 {
     private const int MINIMUM_LENGTH = 6;
 
+    /**
+     * Lengths of 19 or more make `10 ** $length` overflow int into a float,
+     * and passing a float max to `random_int()` throws a TypeError. 10 is
+     * chosen safely below that overflow point, with margin to spare. (It
+     * also carries no security benefit past 10 — see the README — but the
+     * overflow is the reason this is a hard ceiling rather than a
+     * recommendation.)
+     */
     private const int MAXIMUM_LENGTH = 10;
 
     /**

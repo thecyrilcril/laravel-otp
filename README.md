@@ -30,6 +30,9 @@ php artisan vendor:publish --tag=otp-config   # optional
 php artisan migrate
 ```
 
+The published migration is forward-only (no `down()`), so `php artisan migrate:rollback`
+will not drop the `otps` table.
+
 The config publish is optional — every setting has a sensible default (see
 [Configuration](#configuration) below). Publish it only if you need to change a limit,
 the expiry window, or the code length.
