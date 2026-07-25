@@ -60,3 +60,13 @@ it('throttles verification after the configured failures and clears on demand', 
     $this->limiter->guardVerify($this->user, TestPurpose::EmailVerification);
     expect(true)->toBeTrue();
 });
+
+it('guardVerify alone never records attempts', function (): void {
+    // Called far past the limit with no recordFailure: must never throw,
+    // proving guardVerify checks without recording.
+    foreach (range(1, 10) as $i) {
+        $this->limiter->guardVerify($this->user, TestPurpose::EmailVerification);
+    }
+
+    expect(true)->toBeTrue();
+});
