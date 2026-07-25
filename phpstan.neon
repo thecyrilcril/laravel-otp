@@ -6,3 +6,9 @@ parameters:
     paths:
         - src
     tmpDir: build/phpstan
+    ignoreErrors:
+        # HasOtps is a public trait for consumers' models; it has no in-package
+        # consumer, so larastan cannot see it as used.
+        -
+            identifier: trait.unused
+            path: src/Concerns/HasOtps.php
