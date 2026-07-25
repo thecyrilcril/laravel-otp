@@ -6,6 +6,7 @@ namespace Thecyrilcril\Otp\Concerns;
 
 use Carbon\CarbonImmutable;
 use Illuminate\Database\Eloquent\Relations\MorphMany;
+use Illuminate\Support\Facades\DB;
 use Thecyrilcril\Otp\Contracts\OtpPurpose;
 use Thecyrilcril\Otp\Events\OtpIssued;
 use Thecyrilcril\Otp\Exceptions\OtpThrottledException;
@@ -40,14 +41,16 @@ trait HasOtps
         $code = app(CodeGenerator::class)->generate(config()->integer('otp.length', 6));
         $expiresAt = CarbonImmutable::now()->addMinutes(config()->integer('otp.expires_after', 10));
 
-        $this->otps()->where('purpose', $purpose->value())->delete();
+        DB::transaction(function () use ($purpose, $code, $context, $expiresAt): void {
+            $this->otps()->where('purpose', $purpose->value())->delete();
 
-        $this->otps()->create([
-            'purpose' => $purpose->value(),
-            'code' => $code,
-            'context' => $context,
-            'expires_at' => $expiresAt,
-        ]);
+            $this->otps()->create([
+                'purpose' => $purpose->value(),
+                'code' => $code,
+                'context' => $context,
+                'expires_at' => $expiresAt,
+            ]);
+        });
 
         event(new OtpIssued($this, $purpose));
 
