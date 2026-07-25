@@ -82,8 +82,9 @@ $issued->expiresAt; // CarbonImmutable
 
 `issueOtp()` never sends anything. Feed `$issued->code` into your own notification (Mail,
 SMS gateway, whatever). The package's involvement ends the moment it returns the code —
-it is not stored anywhere in plaintext, and `IssuedOtp`'s debug output masks it, so a
-stray `dump($issued)` in a log won't leak it.
+it is not stored anywhere in plaintext, and `IssuedOtp` masks it in both debug output and
+JSON serialization, so neither a stray `dump($issued)` nor a JSON-normalizing logger
+(`Log::info('...', ['otp' => $issued])`) will leak it.
 
 Issuing a new code for a purpose deletes any existing, unconsumed code for that same
 purpose first — there is only ever one live code per model+purpose pair.
@@ -148,7 +149,7 @@ try {
 | Single-use | `consumeOtp()` checks and deletes in one `DB::transaction` with a row lock — two simultaneous submissions of the same code cannot both succeed. |
 | Enumeration-resistant | Every failure path — missing row, expired, wrong code, wrong context, throttled — returns the same `false` to the caller. The precise reason is only ever visible internally, via the failure event. |
 | Context binding | Optional target binding (see above) closes the change-of-target attack that plain code verification is otherwise silent to. |
-| Secrets hygiene | Code parameters are marked `#[SensitiveParameter]` throughout, and `IssuedOtp` masks the code in its `__debugInfo()`. |
+| Secrets hygiene | Code parameters are marked `#[SensitiveParameter]` throughout, and `IssuedOtp` masks the code in both `__debugInfo()` and `jsonSerialize()`. |
 
 ## Events
 

@@ -20,3 +20,12 @@ it('masks the code in debug output', function (): void {
     expect($dump)->not->toContain('123456')
         ->and($dump)->toContain('******');
 });
+
+it('masks the code under json_encode', function (): void {
+    $issued = new IssuedOtp('123456', CarbonImmutable::now()->addMinutes(10));
+
+    $json = json_encode($issued, JSON_THROW_ON_ERROR);
+
+    expect($json)->not->toContain('123456')
+        ->and($json)->toContain('******');
+});
