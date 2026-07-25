@@ -37,7 +37,7 @@ trait HasOtps
      * Never store or log the returned code.
      *
      * @throws OtpThrottledException
-     * @throws \InvalidArgumentException when the configured length is below 6
+     * @throws \InvalidArgumentException when the configured length is outside the 6–10 bounds
      */
     public function issueOtp(OtpPurpose $purpose, ?string $context = null): IssuedOtp
     {
@@ -96,7 +96,7 @@ trait HasOtps
             throw $e;
         }
 
-        return DB::transaction(function () use ($purpose, $code, $context, $consume, $limiter): bool {
+        $reason = DB::transaction(function () use ($purpose, $code, $context, $consume): ?FailureReason {
             /** @var Otp|null $otp */
             $otp = $this->otps()
                 ->where('purpose', $purpose->value())
@@ -106,9 +106,9 @@ trait HasOtps
             $reason = $this->failureReasonFor($otp, $code, $context);
 
             if ($reason instanceof FailureReason) {
-                $this->recordFailure($otp, $purpose, $reason, $limiter);
+                $this->recordAttemptOnFailure($otp);
 
-                return false;
+                return $reason;
             }
 
             /** @var Otp $otp known non-null: failureReasonFor returned null */
@@ -116,11 +116,20 @@ trait HasOtps
                 $otp->delete();
             }
 
-            $limiter->clear($this, $purpose);
-            event(new OtpVerified($this, $purpose));
-
-            return true;
+            return null;
         });
+
+        if ($reason instanceof FailureReason) {
+            $limiter->recordFailure($this, $purpose);
+            event(new OtpVerificationFailed($this, $purpose, $reason));
+
+            return false;
+        }
+
+        $limiter->clear($this, $purpose);
+        event(new OtpVerified($this, $purpose));
+
+        return true;
     }
 
     private function failureReasonFor(?Otp $otp, #[SensitiveParameter] string $code, ?string $context): ?FailureReason
@@ -144,18 +153,16 @@ trait HasOtps
         return null;
     }
 
-    private function recordFailure(?Otp $otp, OtpPurpose $purpose, FailureReason $reason, OtpLimiter $limiter): void
+    private function recordAttemptOnFailure(?Otp $otp): void
     {
-        $limiter->recordFailure($this, $purpose);
-
-        if ($otp instanceof Otp) {
-            $otp->increment('attempts');
-
-            if ($otp->attempts >= config()->integer('otp.max_attempts', 5)) {
-                $otp->delete();
-            }
+        if (! $otp instanceof Otp) {
+            return;
         }
 
-        event(new OtpVerificationFailed($this, $purpose, $reason));
+        $otp->increment('attempts');
+
+        if ($otp->attempts >= config()->integer('otp.max_attempts', 5)) {
+            $otp->delete();
+        }
     }
 }
