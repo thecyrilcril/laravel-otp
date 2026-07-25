@@ -107,7 +107,8 @@
 }
 ```
 
-`phpstan.neon`:
+`phpstan.neon` (note: the `trait.unused` ignore for `HasOtps` is added in **Task 2**, when
+that file first exists — adding it now would fail PHPStan's unmatched-ignore check):
 
 ```neon
 includes:
@@ -118,12 +119,6 @@ parameters:
     paths:
         - src
     tmpDir: build/phpstan
-    ignoreErrors:
-        # HasOtps is a public trait for consumers' models; it has no in-package
-        # consumer, so larastan cannot see it as used.
-        -
-            identifier: trait.unused
-            path: src/Concerns/HasOtps.php
 ```
 
 `phpunit.xml`:
@@ -712,7 +707,20 @@ final class Otp extends Model
 Run: `vendor/bin/pest tests/OtpModelTest.php tests/ServiceProviderTest.php`
 Expected: PASS (all).
 
-- [ ] **Step 5: Lint, analyse, commit**
+- [ ] **Step 5: Add the now-needed PHPStan ignore, lint, analyse, commit**
+
+`HasOtps` now exists but has no in-package consumer (fixtures live under `tests/`, outside
+PHPStan's `paths`), so larastan flags `trait.unused`. Append to `phpstan.neon` under
+`parameters:`:
+
+```neon
+    ignoreErrors:
+        # HasOtps is a public trait for consumers' models; it has no in-package
+        # consumer, so larastan cannot see it as used.
+        -
+            identifier: trait.unused
+            path: src/Concerns/HasOtps.php
+```
 
 ```bash
 vendor/bin/pint && vendor/bin/phpstan analyse
