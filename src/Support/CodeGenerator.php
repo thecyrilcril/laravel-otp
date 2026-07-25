@@ -10,6 +10,8 @@ final class CodeGenerator
 {
     private const int MINIMUM_LENGTH = 6;
 
+    private const int MAXIMUM_LENGTH = 10;
+
     /**
      * Generate a cryptographically random, zero-padded numeric code.
      */
@@ -18,6 +20,12 @@ final class CodeGenerator
         if ($length < self::MINIMUM_LENGTH) {
             throw new InvalidArgumentException(
                 sprintf('OTP length must be at least %d digits, %d configured.', self::MINIMUM_LENGTH, $length)
+            );
+        }
+
+        if ($length > self::MAXIMUM_LENGTH) {
+            throw new InvalidArgumentException(
+                sprintf('OTP length must be at most %d digits, %d configured.', self::MAXIMUM_LENGTH, $length)
             );
         }
 

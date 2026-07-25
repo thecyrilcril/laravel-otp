@@ -21,3 +21,7 @@ it('generates codes of the requested length, digits only, zero-padded', function
 it('refuses lengths below six', function (): void {
     (new CodeGenerator)->generate(4);
 })->throws(InvalidArgumentException::class, 'at least 6');
+
+it('refuses lengths above ten', function (): void {
+    (new CodeGenerator)->generate(19);
+})->throws(InvalidArgumentException::class, 'at most 10');
