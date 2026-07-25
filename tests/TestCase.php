@@ -15,6 +15,16 @@ abstract class TestCase extends Orchestra
     {
         parent::setUp();
 
+        // No-ops on sqlite :memory: (fresh database per test); on MySQL they
+        // make each test start clean, since the schema persists between tests.
+        // The migrations ledger is dropped too so loadMigrationsFrom() below
+        // re-runs the otps migration every test instead of trusting a stale
+        // "already ran" record against a table we just dropped.
+        Schema::dropIfExists('otps');
+        Schema::dropIfExists('migrations');
+        Schema::dropIfExists('int_users');
+        Schema::dropIfExists('users');
+
         Schema::create('users', static function (Blueprint $table): void {
             $table->uuid('id')->primary();
             $table->string('email')->unique();
@@ -40,16 +50,40 @@ abstract class TestCase extends Orchestra
         ];
     }
 
+    /**
+     * Defaults to in-memory sqlite. Set DB_CONNECTION=mysql (with the usual
+     * DB_* variables) to run the identical suite against a real-locking
+     * engine, so the lockForUpdate consume path is exercised for real —
+     * sqlite silently no-ops row locks. CI runs both.
+     */
     protected function defineEnvironment($app): void
     {
         $config = $app['config'];
 
-        $config->set('database.default', 'testing');
+        $connection = env('DB_CONNECTION', 'testing');
+
+        $config->set('database.default', $connection);
         $config->set('database.connections.testing', [
             'driver' => 'sqlite',
             'database' => ':memory:',
             'prefix' => '',
         ]);
+
+        if ($connection === 'mysql') {
+            $config->set('database.connections.mysql', [
+                'driver' => 'mysql',
+                'host' => env('DB_HOST', '127.0.0.1'),
+                'port' => env('DB_PORT', '3306'),
+                'database' => env('DB_DATABASE', 'otp_test'),
+                'username' => env('DB_USERNAME', 'root'),
+                'password' => env('DB_PASSWORD', ''),
+                'charset' => 'utf8mb4',
+                'collation' => 'utf8mb4_unicode_ci',
+                'prefix' => '',
+                'strict' => true,
+            ]);
+        }
+
         $config->set('cache.default', 'array');
     }
 }

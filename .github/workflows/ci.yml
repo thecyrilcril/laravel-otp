@@ -34,3 +34,51 @@ jobs:
 
       - name: Run CI suite (Pint, PHPStan, Pest with coverage)
         run: composer ci
+
+  # sqlite :memory: silently no-ops lockForUpdate, so the consume path's
+  # race-safety never executes there. This leg runs the identical suite on
+  # InnoDB so the locking read is exercised for real.
+  mysql:
+    runs-on: ubuntu-latest
+
+    name: MySQL / PHP 8.4 / Laravel 13.*
+
+    services:
+      mysql:
+        image: mysql:8.0
+        env:
+          MYSQL_ALLOW_EMPTY_PASSWORD: 'yes'
+          MYSQL_DATABASE: otp_test
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping --silent"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: '8.4'
+          coverage: xdebug
+          extensions: pdo_mysql
+
+      - name: Install dependencies
+        run: |
+          composer require "illuminate/support:13.*" --no-interaction --no-update
+          composer update --prefer-dist --no-interaction
+
+      - name: Run CI suite against MySQL
+        env:
+          DB_CONNECTION: mysql
+          DB_HOST: 127.0.0.1
+          DB_PORT: 3306
+          DB_DATABASE: otp_test
+          DB_USERNAME: root
+          DB_PASSWORD: ''
+        run: composer ci
