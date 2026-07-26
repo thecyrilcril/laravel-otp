@@ -96,30 +96,30 @@ trait HasOtps
             throw $e;
         }
 
-        $reason = DB::transaction(function () use ($purpose, $code, $context, $consume): ?FailureReason {
-            /** @var Otp|null $otp */
-            $otp = $this->otps()
-                ->where('purpose', $purpose->value())
-                ->lockForUpdate()
-                ->first();
+        // Unlocked read, newest row first: no lock is held while bcrypt runs
+        // below (a pinned connection per in-flight verify is an availability
+        // vector), and when two concurrently-issued rows exist the check
+        // resolves deterministically to the code the user was sent last.
+        /** @var Otp|null $otp */
+        $otp = $this->otps()
+            ->where('purpose', $purpose->value())
+            ->latest('id')
+            ->first();
 
-            $reason = $this->failureReasonFor($otp, $code, $context);
+        $reason = $this->failureReasonFor($otp, $code, $context);
 
-            if ($reason instanceof FailureReason) {
-                $this->recordAttemptOnFailure($otp);
-
-                return $reason;
-            }
-
+        if (! $reason instanceof FailureReason && $consume) {
             /** @var Otp $otp known non-null: failureReasonFor returned null */
-            if ($consume) {
-                $otp->delete();
-            }
-
-            return null;
-        });
+            $reason = $this->consumeRow($otp, $purpose);
+        }
 
         if ($reason instanceof FailureReason) {
+            // Deliberately outside any package transaction: the package must
+            // never be the reason a failed guess goes unrecorded. (A consumer
+            // transaction wrapping this call can still roll the bookkeeping
+            // back — PHP cannot escape an outer transaction on the same
+            // connection; see the README's consumer transaction caveat.)
+            $this->recordAttemptOnFailure($otp);
             $limiter->recordFailure($this, $purpose);
             event(new OtpVerificationFailed($this, $purpose, $reason));
 
@@ -130,6 +130,31 @@ trait HasOtps
         event(new OtpVerified($this, $purpose));
 
         return true;
+    }
+
+    /**
+     * Single use via compare-and-delete: the delete only wins if the row is
+     * still exactly as read (same key, same attempts). A concurrent consume
+     * or failed guess landing in the bcrypt window changes that predicate,
+     * the delete affects zero rows, and this request reports failure — the
+     * same code can never produce two successes.
+     */
+    private function consumeRow(Otp $otp, OtpPurpose $purpose): ?FailureReason
+    {
+        $deleted = Otp::query()
+            ->whereKey($otp->getKey())
+            ->where('attempts', $otp->attempts)
+            ->delete();
+
+        if ($deleted !== 1) {
+            return FailureReason::NotFound;
+        }
+
+        // A concurrently-issued sibling code must not survive a winning
+        // consume — sweep every remaining row for this model + purpose.
+        $this->otps()->where('purpose', $purpose->value())->delete();
+
+        return null;
     }
 
     /**
@@ -166,16 +191,23 @@ trait HasOtps
         return null;
     }
 
+    /**
+     * Charge the per-row attempts budget with a direct atomic UPDATE (never
+     * a read-modify-write), then retire the row once the budget is spent.
+     * Both statements are self-contained, so no transaction is needed and a
+     * failed guess is durable even though no lock is held.
+     */
     private function recordAttemptOnFailure(?Otp $otp): void
     {
         if (! $otp instanceof Otp) {
             return;
         }
 
-        $otp->increment('attempts');
+        Otp::query()->whereKey($otp->getKey())->increment('attempts');
 
-        if ($otp->attempts >= config()->integer('otp.max_attempts', 5)) {
-            $otp->delete();
-        }
+        Otp::query()
+            ->whereKey($otp->getKey())
+            ->where('attempts', '>=', config()->integer('otp.max_attempts', 5))
+            ->delete();
     }
 }

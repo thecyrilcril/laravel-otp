@@ -52,9 +52,10 @@ abstract class TestCase extends Orchestra
 
     /**
      * Defaults to in-memory sqlite. Set DB_CONNECTION=mysql (with the usual
-     * DB_* variables) to run the identical suite against a real-locking
-     * engine, so the lockForUpdate consume path is exercised for real —
-     * sqlite silently no-ops row locks. CI runs both.
+     * DB_* variables) to run the identical suite against a real concurrent
+     * engine, so the compare-and-delete consume path and the atomic attempts
+     * bookkeeping are exercised for real — sqlite cannot meaningfully model
+     * concurrent writers. CI runs both.
      */
     protected function defineEnvironment($app): void
     {
