@@ -22,34 +22,38 @@ final readonly class OtpLimiter
         private Config $config,
     ) {}
 
+    /**
+     * Atomically increments before comparing: `RateLimiter::increment()`
+     * returns the post-increment hit count, so the check and the hit are the
+     * same cache write. Closes the check-then-hit TOCTOU where N concurrent
+     * callers could all read the pre-increment count and all pass.
+     */
     public function guardIssue(Model $otpable, OtpPurpose $purpose): void
     {
         $key = $this->key('issue', $otpable, $purpose);
         $max = (int) $this->config->get('otp.issue_limit.attempts', 3);
         $decay = (int) $this->config->get('otp.issue_limit.decay', 600);
 
-        if ($this->limiter->tooManyAttempts($key, $max)) {
+        if ($this->limiter->increment($key, $decay) > $max) {
             throw OtpThrottledException::retryIn($this->limiter->availableIn($key));
         }
-
-        $this->limiter->hit($key, $decay);
     }
 
+    /**
+     * Atomically increments before comparing (see {@see self::guardIssue()}).
+     * The limiter now counts *attempts*, not just failures: a successful
+     * verify consumes one unit of budget here, which {@see self::clear()}
+     * immediately refunds on success, so legitimate users are unaffected.
+     */
     public function guardVerify(Model $otpable, OtpPurpose $purpose): void
     {
         $key = $this->key('verify', $otpable, $purpose);
         $max = (int) $this->config->get('otp.verify_limit.attempts', 5);
-
-        if ($this->limiter->tooManyAttempts($key, $max)) {
-            throw OtpThrottledException::retryIn($this->limiter->availableIn($key));
-        }
-    }
-
-    public function recordFailure(Model $otpable, OtpPurpose $purpose): void
-    {
         $decay = (int) $this->config->get('otp.verify_limit.decay', 60);
 
-        $this->limiter->hit($this->key('verify', $otpable, $purpose), $decay);
+        if ($this->limiter->increment($key, $decay) > $max) {
+            throw OtpThrottledException::retryIn($this->limiter->availableIn($key));
+        }
     }
 
     public function clear(Model $otpable, OtpPurpose $purpose): void

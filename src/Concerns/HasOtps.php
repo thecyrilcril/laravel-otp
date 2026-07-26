@@ -127,7 +127,6 @@ trait HasOtps
             // verify limiter, but it means a correct code can be retired
             // without max_attempts wrong guesses ever being made.
             $this->recordAttemptOnFailure($otp);
-            $limiter->recordFailure($this, $purpose);
             event(new OtpVerificationFailed($this, $purpose, $reason));
 
             return false;
