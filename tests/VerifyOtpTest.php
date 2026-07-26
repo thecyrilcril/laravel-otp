@@ -76,12 +76,12 @@ it('kills the code after max_attempts failures, independent of the limiter windo
     foreach (range(1, 4) as $i) {
         $this->user->verifyOtp(TestPurpose::EmailVerification, '000000');
         // Reset the limiter each round to prove the per-row counter acts alone.
-        app(OtpLimiter::class)->clear($this->user, TestPurpose::EmailVerification);
+        app(OtpLimiter::class)->reset($this->user, TestPurpose::EmailVerification);
     }
 
     // 5th failure deletes the row.
     $this->user->verifyOtp(TestPurpose::EmailVerification, '000000');
-    app(OtpLimiter::class)->clear($this->user, TestPurpose::EmailVerification);
+    app(OtpLimiter::class)->reset($this->user, TestPurpose::EmailVerification);
 
     expect($this->user->otps()->count())->toBe(0)
         ->and($this->user->verifyOtp(TestPurpose::EmailVerification, $issued->code))->toBeFalse();

@@ -123,16 +123,19 @@ trait HasOtps
             // Edge worth knowing: on a lost compare-and-delete race where the
             // row is still alive (a concurrent failed guess moved `attempts`
             // during the bcrypt window), this charges the budget for a request
-            // whose code was actually CORRECT. Fail-closed and bounded by the
-            // verify limiter, but it means a correct code can be retired
-            // without max_attempts wrong guesses ever being made.
+            // whose code was actually CORRECT. Fail-closed, but it means a
+            // correct code can be retired without max_attempts wrong guesses
+            // ever being made.
+            //
+            // Only the per-row budget is charged here: the verify limiter was
+            // already charged by guardVerify() above, before the row was read.
             $this->recordAttemptOnFailure($otp);
             event(new OtpVerificationFailed($this, $purpose, $reason));
 
             return false;
         }
 
-        $limiter->clear($this, $purpose);
+        $limiter->refund($this, $purpose);
         event(new OtpVerified($this, $purpose));
 
         return true;

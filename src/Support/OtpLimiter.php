@@ -41,9 +41,15 @@ final readonly class OtpLimiter
 
     /**
      * Atomically increments before comparing (see {@see self::guardIssue()}).
-     * The limiter now counts *attempts*, not just failures: a successful
-     * verify consumes one unit of budget here, which {@see self::clear()}
-     * immediately refunds on success, so legitimate users are unaffected.
+     * The limiter counts *attempts*, not just failures: a successful verify
+     * consumes one unit of budget here, which {@see self::refund()} gives
+     * back, so legitimate users are unaffected.
+     *
+     * Note a throttled call also charges the counter, so `RateLimiter::attempts()`
+     * reads higher than it did under the old check-then-hit gate. Harmless: the
+     * `:timer` key is created with `add`, so extra increments never extend the
+     * window — a throttled attacker cannot deepen their own lockout, nor a
+     * victim's.
      */
     public function guardVerify(Model $otpable, OtpPurpose $purpose): void
     {
@@ -56,7 +62,32 @@ final readonly class OtpLimiter
         }
     }
 
-    public function clear(Model $otpable, OtpPurpose $purpose): void
+    /**
+     * Give back the single unit a successful verify consumed — deliberately
+     * NOT a reset of the counter.
+     *
+     * Since guardVerify became the primary gate, a reset would be an attacker
+     * primitive: anyone able to produce one success could zero a nearly
+     * exhausted budget and keep guessing indefinitely inside the window. A
+     * one-unit refund keeps a legitimate success net-zero while leaving every
+     * prior failure banked.
+     */
+    public function refund(Model $otpable, OtpPurpose $purpose): void
+    {
+        $decay = (int) $this->config->get('otp.verify_limit.decay', 60);
+
+        $this->limiter->decrement($this->key('verify', $otpable, $purpose), $decay);
+    }
+
+    /**
+     * Drop the verify budget entirely, as if the window had elapsed.
+     *
+     * Not used on any verification path — a full reset there would be an
+     * attacker primitive (see {@see self::refund()}). This exists for
+     * consumers that legitimately need to forgive a lockout out-of-band, e.g.
+     * an admin unblocking a user, and for tests that simulate window rollover.
+     */
+    public function reset(Model $otpable, OtpPurpose $purpose): void
     {
         $this->limiter->clear($this->key('verify', $otpable, $purpose));
     }

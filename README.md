@@ -99,9 +99,10 @@ $user->consumeOtp(Purpose::EmailVerification, $code);   // check + delete, singl
 Both return `bool`. Use `verifyOtp()` when you need to check a code without spending it
 (for example, a multi-step form where the user might need to resubmit); use
 `consumeOtp()` for anything security-sensitive, since it deletes the row atomically on
-success so the same code can never be replayed. A failed check still counts against the
-rate limiter and the per-code attempts budget either way — `verifyOtp()` is
-non-destructive on *success* only, not a free-to-guess channel.
+success so the same code can never be replayed. **Every** attempt counts against the rate
+limiter either way (a successful one is refunded a single unit, so legitimate users are
+net-zero), and every *failed* attempt additionally charges the per-code attempts budget —
+`verifyOtp()` is non-destructive on *success* only, not a free-to-guess channel.
 
 ### Context binding
 
