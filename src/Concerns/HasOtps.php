@@ -119,6 +119,13 @@ trait HasOtps
             // transaction wrapping this call can still roll the bookkeeping
             // back — PHP cannot escape an outer transaction on the same
             // connection; see the README's consumer transaction caveat.)
+            //
+            // Edge worth knowing: on a lost compare-and-delete race where the
+            // row is still alive (a concurrent failed guess moved `attempts`
+            // during the bcrypt window), this charges the budget for a request
+            // whose code was actually CORRECT. Fail-closed and bounded by the
+            // verify limiter, but it means a correct code can be retired
+            // without max_attempts wrong guesses ever being made.
             $this->recordAttemptOnFailure($otp);
             $limiter->recordFailure($this, $purpose);
             event(new OtpVerificationFailed($this, $purpose, $reason));
@@ -151,8 +158,15 @@ trait HasOtps
         }
 
         // A concurrently-issued sibling code must not survive a winning
-        // consume — sweep every remaining row for this model + purpose.
-        $this->otps()->where('purpose', $purpose->value())->delete();
+        // consume — but the sweep is bounded to rows that PREDATE the consumed
+        // one. A code issued after this consume (a resend landing in this
+        // window) has to survive: deleting it would strand the user holding a
+        // freshly mailed code with no backing row, indistinguishable from a
+        // wrong guess.
+        $this->otps()
+            ->where('purpose', $purpose->value())
+            ->where('id', '<', $otp->getKey())
+            ->delete();
 
         return null;
     }
