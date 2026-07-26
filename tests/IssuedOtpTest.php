@@ -29,3 +29,16 @@ it('masks the code under json_encode', function (): void {
     expect($json)->not->toContain('123456')
         ->and($json)->toContain('******');
 });
+
+it('refuses to be serialized rather than leaking the code into durable storage', function (): void {
+    $issued = new IssuedOtp('123456', CarbonImmutable::now()->addMinutes(10));
+
+    expect(fn (): string => serialize($issued))
+        ->toThrow(LogicException::class, 'must not be serialized');
+});
+
+it('still exposes the code directly — the object must remain usable', function (): void {
+    $issued = new IssuedOtp('123456', CarbonImmutable::now()->addMinutes(10));
+
+    expect($issued->code)->toBe('123456');
+});

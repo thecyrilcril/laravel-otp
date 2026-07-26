@@ -181,18 +181,35 @@ trait HasOtps
      */
     private static ?string $timingDummyHash = null;
 
+    /**
+     * Spend the same bcrypt work a real code comparison costs, on failure
+     * paths that would otherwise return early.
+     *
+     * Every failure branch must cost one Hash::check, or response time
+     * discloses which branch was taken — e.g. "no code exists" versus "a
+     * recently-expired code exists" versus "wrong code". Any new early
+     * return added to failureReasonFor() needs this call too.
+     */
+    private function burnTimingEqualizer(#[SensitiveParameter] string $code): void
+    {
+        Hash::check($code, self::$timingDummyHash ??= Hash::make('thecyrilcril/laravel-otp:timing-equalizer'));
+    }
+
     private function failureReasonFor(?Otp $otp, #[SensitiveParameter] string $code, ?string $context): ?FailureReason
     {
         if (! $otp instanceof Otp) {
-            // Burn the same bcrypt work the CodeMismatch path does, so
-            // response time cannot reveal whether an active code exists
-            // (e.g. "this account has a password reset pending").
-            Hash::check($code, self::$timingDummyHash ??= Hash::make('thecyrilcril/laravel-otp:timing-equalizer'));
+            $this->burnTimingEqualizer($code);
 
             return FailureReason::NotFound;
         }
 
         if ($otp->isExpired()) {
+            // Expiry is checked before the code is compared, so this branch
+            // would otherwise return without any bcrypt work — leaking, by
+            // response time, that a recently-expired code exists for this
+            // user and purpose.
+            $this->burnTimingEqualizer($code);
+
             return FailureReason::Expired;
         }
 
