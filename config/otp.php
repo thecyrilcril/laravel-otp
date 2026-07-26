@@ -30,8 +30,10 @@ return [
     | Rate Limits
     |--------------------------------------------------------------------------
     |
-    | verify_limit: failed verification attempts allowed per model+purpose
-    | within the decay window (seconds).
+    | verify_limit: verification attempts allowed per model+purpose within
+    | the decay window (seconds). Counts every guarded attempt, not just
+    | failures — a successful verify consumes one unit but is immediately
+    | refunded, so legitimate users are unaffected.
     | issue_limit: codes that may be issued per model+purpose within the
     | decay window (seconds) — throttles mail/SMS bombing.
     | max_attempts: per-code failure budget; exceeded => the code is deleted

@@ -96,40 +96,81 @@ trait HasOtps
             throw $e;
         }
 
-        $reason = DB::transaction(function () use ($purpose, $code, $context, $consume): ?FailureReason {
-            /** @var Otp|null $otp */
-            $otp = $this->otps()
-                ->where('purpose', $purpose->value())
-                ->lockForUpdate()
-                ->first();
+        // Unlocked read, newest row first: no lock is held while bcrypt runs
+        // below (a pinned connection per in-flight verify is an availability
+        // vector), and when two concurrently-issued rows exist the check
+        // resolves deterministically to the code the user was sent last.
+        /** @var Otp|null $otp */
+        $otp = $this->otps()
+            ->where('purpose', $purpose->value())
+            ->latest('id')
+            ->first();
 
-            $reason = $this->failureReasonFor($otp, $code, $context);
+        $reason = $this->failureReasonFor($otp, $code, $context);
 
-            if ($reason instanceof FailureReason) {
-                $this->recordAttemptOnFailure($otp);
-
-                return $reason;
-            }
-
+        if (! $reason instanceof FailureReason && $consume) {
             /** @var Otp $otp known non-null: failureReasonFor returned null */
-            if ($consume) {
-                $otp->delete();
-            }
-
-            return null;
-        });
+            $reason = $this->consumeRow($otp, $purpose);
+        }
 
         if ($reason instanceof FailureReason) {
-            $limiter->recordFailure($this, $purpose);
+            // Deliberately outside any package transaction: the package must
+            // never be the reason a failed guess goes unrecorded. (A consumer
+            // transaction wrapping this call can still roll the bookkeeping
+            // back — PHP cannot escape an outer transaction on the same
+            // connection; see the README's consumer transaction caveat.)
+            //
+            // Edge worth knowing: on a lost compare-and-delete race where the
+            // row is still alive (a concurrent failed guess moved `attempts`
+            // during the bcrypt window), this charges the budget for a request
+            // whose code was actually CORRECT. Fail-closed, but it means a
+            // correct code can be retired without max_attempts wrong guesses
+            // ever being made.
+            //
+            // Only the per-row budget is charged here: the verify limiter was
+            // already charged by guardVerify() above, before the row was read.
+            $this->recordAttemptOnFailure($otp);
             event(new OtpVerificationFailed($this, $purpose, $reason));
 
             return false;
         }
 
-        $limiter->clear($this, $purpose);
+        $limiter->refund($this, $purpose);
         event(new OtpVerified($this, $purpose));
 
         return true;
+    }
+
+    /**
+     * Single use via compare-and-delete: the delete only wins if the row is
+     * still exactly as read (same key, same attempts). A concurrent consume
+     * or failed guess landing in the bcrypt window changes that predicate,
+     * the delete affects zero rows, and this request reports failure — the
+     * same code can never produce two successes.
+     */
+    private function consumeRow(Otp $otp, OtpPurpose $purpose): ?FailureReason
+    {
+        $deleted = Otp::query()
+            ->whereKey($otp->getKey())
+            ->where('attempts', $otp->attempts)
+            ->delete();
+
+        if ($deleted !== 1) {
+            return FailureReason::NotFound;
+        }
+
+        // A concurrently-issued sibling code must not survive a winning
+        // consume — but the sweep is bounded to rows that PREDATE the consumed
+        // one. A code issued after this consume (a resend landing in this
+        // window) has to survive: deleting it would strand the user holding a
+        // freshly mailed code with no backing row, indistinguishable from a
+        // wrong guess.
+        $this->otps()
+            ->where('purpose', $purpose->value())
+            ->where('id', '<', $otp->getKey())
+            ->delete();
+
+        return null;
     }
 
     /**
@@ -140,18 +181,35 @@ trait HasOtps
      */
     private static ?string $timingDummyHash = null;
 
+    /**
+     * Spend the same bcrypt work a real code comparison costs, on failure
+     * paths that would otherwise return early.
+     *
+     * Every failure branch must cost one Hash::check, or response time
+     * discloses which branch was taken — e.g. "no code exists" versus "a
+     * recently-expired code exists" versus "wrong code". Any new early
+     * return added to failureReasonFor() needs this call too.
+     */
+    private function burnTimingEqualizer(#[SensitiveParameter] string $code): void
+    {
+        Hash::check($code, self::$timingDummyHash ??= Hash::make('thecyrilcril/laravel-otp:timing-equalizer'));
+    }
+
     private function failureReasonFor(?Otp $otp, #[SensitiveParameter] string $code, ?string $context): ?FailureReason
     {
         if (! $otp instanceof Otp) {
-            // Burn the same bcrypt work the CodeMismatch path does, so
-            // response time cannot reveal whether an active code exists
-            // (e.g. "this account has a password reset pending").
-            Hash::check($code, self::$timingDummyHash ??= Hash::make('thecyrilcril/laravel-otp:timing-equalizer'));
+            $this->burnTimingEqualizer($code);
 
             return FailureReason::NotFound;
         }
 
         if ($otp->isExpired()) {
+            // Expiry is checked before the code is compared, so this branch
+            // would otherwise return without any bcrypt work — leaking, by
+            // response time, that a recently-expired code exists for this
+            // user and purpose.
+            $this->burnTimingEqualizer($code);
+
             return FailureReason::Expired;
         }
 
@@ -166,16 +224,23 @@ trait HasOtps
         return null;
     }
 
+    /**
+     * Charge the per-row attempts budget with a direct atomic UPDATE (never
+     * a read-modify-write), then retire the row once the budget is spent.
+     * Both statements are self-contained, so no transaction is needed and a
+     * failed guess is durable even though no lock is held.
+     */
     private function recordAttemptOnFailure(?Otp $otp): void
     {
         if (! $otp instanceof Otp) {
             return;
         }
 
-        $otp->increment('attempts');
+        Otp::query()->whereKey($otp->getKey())->increment('attempts');
 
-        if ($otp->attempts >= config()->integer('otp.max_attempts', 5)) {
-            $otp->delete();
-        }
+        Otp::query()
+            ->whereKey($otp->getKey())
+            ->where('attempts', '>=', config()->integer('otp.max_attempts', 5))
+            ->delete();
     }
 }
