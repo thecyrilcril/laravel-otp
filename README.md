@@ -150,7 +150,39 @@ try {
 | Single-use | `consumeOtp()` checks and deletes in one `DB::transaction` with a row lock — two simultaneous submissions of the same code cannot both succeed. |
 | Enumeration-resistant | Every failure path — missing row, expired, wrong code, wrong context, throttled — returns the same `false` to the caller. The precise reason is only ever visible internally, via the failure event. |
 | Context binding | Optional target binding (see above) closes the change-of-target attack that plain code verification is otherwise silent to. |
-| Secrets hygiene | Code parameters are marked `#[SensitiveParameter]` throughout, and `IssuedOtp` masks the code in both `__debugInfo()` and `jsonSerialize()`. |
+| Secrets hygiene | Code parameters are marked `#[SensitiveParameter]` throughout; `IssuedOtp` masks the code in `__debugInfo()` and `jsonSerialize()`, and **throws** if you try to `serialize()` it (that is how queue payloads and file/database sessions encode objects — the one channel that would write the plaintext to durable storage). |
+
+### ⚠️ Do not call `verifyOtp()`/`consumeOtp()` inside a transaction that rolls back
+
+A failed check charges two budgets: the rate limiter (in the cache) and the
+per-code `attempts` counter (a database row). The package deliberately runs the
+`attempts` write outside any transaction of its own — but it **cannot escape a
+transaction you opened**. If your code wraps the call and then throws to signal
+failure, your rollback takes the `attempts` increment with it, and an attacker
+gets unlimited guesses against a live code for its whole validity window.
+
+```php
+// ❌ the rollback erases the failed-guess record
+DB::transaction(function () use ($user, $code) {
+    if (! $user->consumeOtp(Purpose::EmailVerification, $code)) {
+        throw ValidationException::withMessages([...]);   // attempts increment lost
+    }
+    $user->markEmailAsVerified();
+});
+
+// ✅ check outside; only the success path is transactional
+$consumed = $user->consumeOtp(Purpose::EmailVerification, $code);
+
+if (! $consumed) {
+    throw ValidationException::withMessages([...]);
+}
+
+DB::transaction(fn () => $user->markEmailAsVerified());
+```
+
+The rate limiter is unaffected either way (it lives in the cache, not the
+database), so throttling still applies — but the per-code budget is the backstop
+that survives a flushed or per-server cache, and it is worth keeping.
 
 ## Events
 
